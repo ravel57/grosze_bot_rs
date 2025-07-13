@@ -68,7 +68,6 @@ async fn handle_message(bot: Bot, msg: Message) -> HandlerResult {
                     bot.send_message(telegram_id, "Пришли как ты хочешь подписать этот контакт")
                         .await
                         .expect("ERROR executing NewContactTelegramUsername");
-                    println!("{:?}\n{:?}", user, contact);
                     db_util::set_selected_contact(&user, contact.id)
                         .expect("ERROR executing NewContactTelegramUsername");
                     set_user_status(&user, &InputtingStatus::NewContactInternalName)
