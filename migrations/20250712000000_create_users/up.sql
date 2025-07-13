@@ -5,7 +5,6 @@ CREATE TYPE inputting_status AS ENUM (
     'edit_contact_internal_name',
     'delete_contact',
     'select_contact_for_transaction',
-    'select_direction_for_transaction',
     'transaction_amount'
     );
 

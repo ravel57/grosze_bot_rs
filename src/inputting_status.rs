@@ -20,8 +20,6 @@ pub enum InputtingStatus {
     DeleteContact,
     #[db_rename = "select_contact_for_transaction"]
     SelectContactForTransaction,
-    #[db_rename = "select_direction_for_transaction"]
-    SelectDirectionForTransaction,
     #[db_rename = "transaction_amount"]
     TransactionAmount,
 }

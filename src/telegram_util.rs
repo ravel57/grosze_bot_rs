@@ -50,6 +50,8 @@ enum MenuCommand {
     DeleteContact,
     TransactionDirectionGave,
     TransactionDirectionTook,
+    TransactionSettledAccounts,
+    TransactionHistory,
 }
 
 pub fn message_handler_schema() -> Handler<'static, HandlerResult, DpHandlerDescription> {
@@ -120,8 +122,7 @@ async fn handle_message(bot: Bot, msg: Message) -> HandlerResult {
             send_menu(&bot, telegram_id).await;
         }
         InputtingStatus::DeleteContact => { /*TODO*/ }
-        InputtingStatus::SelectContactForTransaction => { /*TODO*/ }
-        InputtingStatus::SelectDirectionForTransaction => { /*TODO*/ }
+        InputtingStatus::SelectContactForTransaction => {}
         InputtingStatus::TransactionAmount => {
             let contact = db_util::get_selected_contact(&user).unwrap();
             if user.selected_transaction_duration.eq(&Option::from(0)) {
@@ -260,6 +261,8 @@ async fn handle_callback(bot: Bot, callback: CallbackQuery) -> HandlerResult {
                     .await
                     .expect("ERROR executing getting debits");
             }
+            Ok(MenuCommand::TransactionSettledAccounts) => { /*TODO*/ }
+            Ok(MenuCommand::TransactionHistory) => { /*TODO*/ }
             Err(_) => {
                 if data.starts_with(CALLBACK_SELECT_USER_PLACEHOLDER) {
                     handle_callback_for_selected_user(&data, &user, &bot, telegram_id, message_id)
@@ -293,7 +296,6 @@ async fn handle_callback_for_selected_user(
                 .expect("ERROR executing EditContact");
         }
         InputtingStatus::SelectContactForTransaction => {
-            set_user_status(user, &InputtingStatus::SelectDirectionForTransaction);
             let keyboard = InlineKeyboardMarkup::new(vec![
                 vec![
                     InlineKeyboardButton::callback(
@@ -308,11 +310,11 @@ async fn handle_callback_for_selected_user(
                 vec![
                     InlineKeyboardButton::callback(
                         "История",
-                        MenuCommand::TransactionDirectionGave.to_string(),
+                        MenuCommand::TransactionHistory.to_string(),
                     ),
                     InlineKeyboardButton::callback(
                         "Расчитались",
-                        MenuCommand::TransactionDirectionTook.to_string(),
+                        MenuCommand::TransactionSettledAccounts.to_string(),
                     ),
                 ],
             ]);
