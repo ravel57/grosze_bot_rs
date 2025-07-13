@@ -9,7 +9,7 @@ use crate::models::User;
 use crate::schema::contacts::dsl as contacts_dsl;
 use crate::schema::transactions::dsl as txs_dsl;
 use crate::schema::users_t::dsl as users_dsl;
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use diesel::prelude::*;
 use diesel::prelude::*;
 use diesel::prelude::*;
@@ -17,7 +17,6 @@ use diesel::result::QueryResult;
 use diesel::upsert::excluded;
 use diesel::PgConnection;
 use diesel::RunQueryDsl;
-use log::error;
 use std::str::FromStr;
 
 /// blablabla
@@ -71,7 +70,7 @@ pub fn find_or_create_contact(user: &User, contact: &User) -> Contact {
                     .filter(contacts_dsl::contact_id.eq(contact.id))
                     .first(&mut conn)
             } else {
-                error!("Error: {:?}", err);
+                log::error!("Error: {:?}", err);
                 Err(err)
             }
         })
@@ -89,21 +88,27 @@ pub fn find_all_contacts_for_user(user: &User) -> Vec<Contact> {
 
 /// Создаёт транзакцию между двумя пользователями
 pub fn create_transaction(
-    conn: &mut PgConnection,
     from: &User,
     to: &User,
-    amt_str: &str,
-) -> Transaction {
-    let amt = BigDecimal::from_str(amt_str).unwrap();
-    let new_tx = NewTransaction {
-        from_user_id: from.id,
-        to_user_id: to.id,
-        amount: amt,
-    };
-    diesel::insert_into(txs_dsl::transactions)
-        .values(&new_tx)
-        .get_result::<Transaction>(conn)
-        .expect("Error creating transaction")
+    amount_str: &str,
+) -> Result<Transaction, ParseBigDecimalError> {
+    let mut conn = establish_connection();
+    let amount = BigDecimal::from_str(amount_str);
+    match amount {
+        Ok(amount) => {
+            let new_tx = NewTransaction {
+                from_user_id: from.id,
+                to_user_id: to.id,
+                amount,
+            };
+            let transaction = diesel::insert_into(txs_dsl::transactions)
+                .values(&new_tx)
+                .get_result::<Transaction>(&mut conn)
+                .expect("Error creating transaction");
+            Ok(transaction)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 pub fn set_user_status(user: &User, new_status: &InputtingStatus) -> QueryResult<User> {
@@ -144,4 +149,50 @@ pub fn get_selected_contact(user: &User) -> QueryResult<User> {
     } else {
         Err(diesel::result::Error::NotFound)
     }
+}
+
+pub fn find_user_by_contact_name(user: &User, contact_name: &str) -> QueryResult<User> {
+    let mut conn = establish_connection();
+    contacts_dsl::contacts
+        .inner_join(users_dsl::users_t.on(contacts_dsl::contact_id.eq(users_dsl::id)))
+        .filter(contacts_dsl::user_id.eq(user.id))
+        .filter(contacts_dsl::name.eq(contact_name))
+        .select(users_dsl::users_t::all_columns())
+        .first::<User>(&mut conn)
+}
+
+pub fn set_selected_transaction_duration(user: &User, direction: i32) -> QueryResult<User> {
+    let mut conn: PgConnection = establish_connection();
+    diesel::update(users_dsl::users_t.filter(users_dsl::id.eq(user.id)))
+        .set(users_dsl::selected_transaction_duration.eq(direction))
+        .get_result(&mut conn)
+}
+
+/// Возвращает сводку сумм, которые пользователь `user` перевёл каждому контакту,
+/// где ключ — имя контакта, а значение — сумма переводов (BigDecimal).
+pub fn get_debit(user: &User) -> QueryResult<Vec<(String, BigDecimal)>> {
+    let mut conn = establish_connection();
+    let rows: Vec<(Option<String>, Option<BigDecimal>)> = contacts_dsl::contacts
+        .filter(contacts_dsl::user_id.eq(user.id))
+        .inner_join(
+            txs_dsl::transactions.on(
+                contacts_dsl::contact_id.eq(txs_dsl::to_user_id),
+            )
+        )
+        .filter(txs_dsl::from_user_id.eq(user.id))
+        .group_by(contacts_dsl::name)
+        .select((
+            contacts_dsl::name,
+            diesel::dsl::sum(txs_dsl::amount),
+        ))
+        .load(&mut conn)?;
+    let summary = rows
+        .into_iter()
+        .map(|(name_opt, sum_opt)| {
+            let name = name_opt.unwrap_or_else(|| "<unknown>".to_string());
+            let total = sum_opt.unwrap_or_else(|| BigDecimal::from(0));
+            (name, total)
+        })
+        .collect();
+    Ok(summary)
 }

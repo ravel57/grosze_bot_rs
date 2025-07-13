@@ -14,6 +14,14 @@ pub enum InputtingStatus {
     NewContactTelegramUsername,
     #[db_rename = "new_contact_internal_name"]
     NewContactInternalName,
+    #[db_rename = "edit_contact_internal_name"]
+    EditContactInternalName,
+    #[db_rename = "delete_contact"]
+    DeleteContact,
+    #[db_rename = "select_contact_for_transaction"]
+    SelectContactForTransaction,
+    #[db_rename = "select_direction_for_transaction"]
+    SelectDirectionForTransaction,
     #[db_rename = "transaction_amount"]
     TransactionAmount,
 }

@@ -1,6 +1,8 @@
-use diesel::{Connection, PgConnection};
+use diesel::Connection;
+use diesel::PgConnection;
+use diesel_migrations::embed_migrations;
 use diesel_migrations::EmbeddedMigrations;
-use diesel_migrations::{embed_migrations, MigrationHarness};
+use diesel_migrations::MigrationHarness;
 use std::env;
 use teloxide::dispatching::Dispatcher;
 use teloxide::Bot;
@@ -38,12 +40,3 @@ pub fn establish_connection() -> PgConnection {
     let mut conn = PgConnection::establish(&database_url).expect("Error connecting to database");
     conn
 }
-
-/*
-fn run_example(conn: &mut PgConnection) {
-    let alice = find_or_create_user(conn, 123456789, "alice_bot".into());
-    let bob = find_or_create_user(conn, 987654321, "bob_bot".into());
-    find_or_create_contact(conn, &alice, &bob, "Bob Friend");
-    create_transaction(conn, &alice, &bob, "42.50");
-}
-*/

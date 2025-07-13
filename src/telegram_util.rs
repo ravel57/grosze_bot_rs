@@ -1,8 +1,9 @@
 use crate::db_util;
 use crate::inputting_status::InputtingStatus;
+use crate::models::Transaction;
 use crate::models::User;
-use crate::schema::contacts::dsl::contacts;
 use crate::HandlerResult;
+use bigdecimal::BigDecimal;
 use diesel::prelude::*;
 use diesel::result::Error;
 use std::str::FromStr;
@@ -13,9 +14,18 @@ use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 use teloxide::types::InlineKeyboardButton;
 use teloxide::types::InlineKeyboardMarkup;
+use teloxide::types::MessageId;
 use teloxide::utils::command::BotCommands;
 use teloxide::utils::command::ParseError;
 use teloxide::Bot;
+
+const CALLBACK_SELECT_USER_PLACEHOLDER: &'static str = "selected_contact_";
+
+/*
+  TODO
+    Подтверждения
+    Расчитались
+*/
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -33,11 +43,13 @@ enum Command {
 #[derive(EnumString, Display, Debug)]
 #[strum(serialize_all = "snake_case")]
 enum MenuCommand {
-    AddNewContact,
     SelectContact,
+    Debts,
+    AddNewContact,
     EditContact,
     DeleteContact,
-    Debts,
+    TransactionDirectionGave,
+    TransactionDirectionTook,
 }
 
 pub fn message_handler_schema() -> Handler<'static, HandlerResult, DpHandlerDescription> {
@@ -59,7 +71,10 @@ async fn handle_message(bot: Bot, msg: Message) -> HandlerResult {
     let user = db_util::get_user_by_telegram_id(telegram_id.0).unwrap();
     let msg_text = msg.text().expect("ERROR getting message text").to_string();
     match user.status {
-        InputtingStatus::None => { /*TODO*/ }
+        InputtingStatus::None => {
+            bot.send_message(telegram_id, "Никакого действия не выбрано, зайди в /menu")
+                .await?;
+        }
         InputtingStatus::NewContactTelegramUsername => {
             let username = msg_text.replace("@", "");
             let result = add_new_contact(&user, &username);
@@ -70,7 +85,7 @@ async fn handle_message(bot: Bot, msg: Message) -> HandlerResult {
                         .expect("ERROR executing NewContactTelegramUsername");
                     db_util::set_selected_contact(&user, contact.id)
                         .expect("ERROR executing NewContactTelegramUsername");
-                    set_user_status(&user, &InputtingStatus::NewContactInternalName)
+                    set_user_status(&user, &InputtingStatus::NewContactInternalName);
                 }
                 Err(_) => {
                     bot.send_message(telegram_id, "Пользователь не найден\nСкорее всего он не зарегестирован в боте или ошибка в имени\nПришли еще раз или перейди в /menu")
@@ -83,13 +98,52 @@ async fn handle_message(bot: Bot, msg: Message) -> HandlerResult {
             let contact = db_util::get_selected_contact(&user).unwrap();
             let result = edit_contact(&user, &contact, &msg_text);
             match result {
-                Ok(_) => bot.send_message(telegram_id, "Готово".to_string()),
-                Err(_) => bot.send_message(telegram_id, "Ошибка".to_string()),
-            }
-            .await
-            .expect("ERROR executing NewContactInternalName");
+                Ok(_) => {
+                    bot.send_message(telegram_id, "Готово")
+                        .await
+                        .expect("ERROR executing NewContactInternalName");
+                }
+                Err(_) => {
+                    bot.send_message(telegram_id, "Ошибка")
+                        .await
+                        .expect("ERROR executing NewContactInternalName");
+                }
+            };
+            send_menu(&bot, telegram_id).await;
         }
-        InputtingStatus::TransactionAmount => { /*TODO*/ }
+        InputtingStatus::EditContactInternalName => {
+            let contact = db_util::get_selected_contact(&user).unwrap();
+            edit_contact(&user, &contact, &msg_text).expect("ERROR executing EditContact callback");
+            bot.send_message(telegram_id, "Готово")
+                .await
+                .expect("ERROR executing EditContactInternalName");
+            send_menu(&bot, telegram_id).await;
+        }
+        InputtingStatus::DeleteContact => { /*TODO*/ }
+        InputtingStatus::SelectContactForTransaction => { /*TODO*/ }
+        InputtingStatus::SelectDirectionForTransaction => { /*TODO*/ }
+        InputtingStatus::TransactionAmount => {
+            let contact = db_util::get_selected_contact(&user).unwrap();
+            if user.selected_transaction_duration.eq(&Option::from(0)) {
+                create_transaction(
+                    &user,
+                    &contact,
+                    msg_text.as_str(),
+                    &bot,
+                    telegram_id.clone(),
+                )
+                .await;
+            } else {
+                create_transaction(
+                    &contact,
+                    &user,
+                    msg_text.as_str(),
+                    &bot,
+                    telegram_id.clone(),
+                )
+                .await;
+            }
+        }
     }
     Ok(())
 }
@@ -99,50 +153,34 @@ async fn handle_command(bot: Bot, msg: Message) -> HandlerResult {
     if let Some(text) = msg.text() {
         match Command::parse(text, "") {
             Ok(Command::Start) => {
-                db_util::find_or_create_user(
-                    telegram_id.0,
-                    &msg.chat
-                        .username()
-                        .expect("ERROR Username is not null")
-                        .to_string(),
-                );
+                let username = msg
+                    .chat
+                    .username()
+                    .expect("ERROR Username is not null")
+                    .to_string();
+                db_util::find_or_create_user(telegram_id.0, &username);
+                send_menu(&bot, telegram_id.clone()).await;
             }
             Ok(Command::Menu) => {
-                let keyboard = InlineKeyboardMarkup::new(vec![
-                    vec![
-                        InlineKeyboardButton::callback(
-                            "Выбрать контакт",
-                            MenuCommand::SelectContact.to_string(),
-                        ),
-                        InlineKeyboardButton::callback(
-                            "Общий расчет",
-                            MenuCommand::Debts.to_string(),
-                        ),
-                    ],
-                    vec![
-                        InlineKeyboardButton::callback(
-                            "Добавить контакт",
-                            MenuCommand::AddNewContact.to_string(),
-                        ),
-                        InlineKeyboardButton::callback(
-                            "Редактировать контакт",
-                            MenuCommand::EditContact.to_string(),
-                        ),
-                        InlineKeyboardButton::callback(
-                            "Удалить контакт",
-                            MenuCommand::DeleteContact.to_string(),
-                        ),
-                    ],
-                ]);
-                bot.send_message(telegram_id, "Выберите действие:")
-                    .reply_markup(keyboard)
-                    .await
-                    .expect("Не удалось отправить меню");
+                send_menu(&bot, telegram_id.clone()).await;
             }
             Ok(Command::Debts) => {
-                bot.send_message(telegram_id, get_debit())
+                let username = msg
+                    .chat
+                    .username()
+                    .expect("ERROR Username is not null")
+                    .to_string();
+                let user = db_util::find_or_create_user(telegram_id.0, &username);
+                let summary: Vec<(String, BigDecimal)> = get_debit(&user).expect("DB error");
+                let text = summary
+                    .iter()
+                    .map(|(name, amount)| format!("{}: {}", name, amount))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                bot.send_message(telegram_id, text)
                     .await
                     .expect("ERROR executing getting debits");
+                send_menu(&bot, telegram_id.clone()).await;
             }
             Ok(Command::Contacts) => {
                 let user = db_util::get_user_by_telegram_id(telegram_id.0).unwrap();
@@ -160,7 +198,7 @@ async fn handle_command(bot: Bot, msg: Message) -> HandlerResult {
 async fn handle_callback(bot: Bot, callback: CallbackQuery) -> HandlerResult {
     let telegram_id = callback.from.id;
     let message_id = callback.message.expect("Message ID not found").id();
-    let user = db_util::get_user_by_telegram_id(telegram_id.0 as i64).unwrap(); //FIXME если нет пользователя то приложение падает
+    let mut user = db_util::get_user_by_telegram_id(telegram_id.0 as i64).unwrap(); //FIXME если нет пользователя то приложение падает
     bot.answer_callback_query(callback.id.clone()).await?;
     if let Some(data) = callback.data {
         match data.parse::<MenuCommand>() {
@@ -174,56 +212,132 @@ async fn handle_callback(bot: Bot, callback: CallbackQuery) -> HandlerResult {
                 set_user_status(&user, &InputtingStatus::NewContactTelegramUsername);
             }
             Ok(MenuCommand::SelectContact) => {
-                let mut current_line: Vec<InlineKeyboardButton> = vec![];
-                let mut lines: Vec<Vec<InlineKeyboardButton>> = vec![];
-                let mut buttons_in_line: i8 = 0;
-                for contact_name in get_contacts_names(&user) {
-                    current_line.push(InlineKeyboardButton::callback(
-                        &contact_name,
-                        format!("selected_contact_{}", &contact_name),
-                    ));
-                    buttons_in_line += 1;
-                    if buttons_in_line >= 3 {
-                        lines.push(current_line.clone());
-                        current_line.clear();
-                        buttons_in_line = 0;
-                    }
-                }
-                if !current_line.is_empty() {
-                    lines.push(current_line.clone());
-                }
-                if !&lines.is_empty() {
-                    bot.edit_message_text(telegram_id, message_id, "Выбери контакт:")
-                        .await
-                        .expect("ERROR executing SelectContact callback");
-                    bot.edit_message_reply_markup(telegram_id, message_id)
-                        .reply_markup(InlineKeyboardMarkup::new(lines))
-                        .await
-                        .expect("ERROR executing SelectContact callback");
-                }
+                send_contacts(&bot, &user, telegram_id.clone(), message_id.clone())
+                    .await
+                    .expect("ERROR executing SelectContact");
+                set_user_status(&user, &InputtingStatus::SelectContactForTransaction);
             }
             Ok(MenuCommand::EditContact) => {
-                panic!("TODO")
+                send_contacts(&bot, &user, telegram_id.clone(), message_id.clone())
+                    .await
+                    .expect("ERROR executing EditContact");
+                set_user_status(&user, &InputtingStatus::EditContactInternalName);
             }
             Ok(MenuCommand::DeleteContact) => {
-                panic!("TODO")
+                // TODO
+                bot.send_message(telegram_id, "MenuCommand::DeleteContact")
+                    .await
+                    .expect("ERROR executing DeleteContact");
+            }
+            Ok(MenuCommand::TransactionDirectionGave) => {
+                user.selected_transaction_duration = Option::from(0);
+                db_util::set_selected_transaction_duration(&user, 0)
+                    .expect("ERROR executing TransactionDirectionGave");
+                set_user_status(&user, &InputtingStatus::TransactionAmount);
+                let text = "Пришли сумму или вернись в /menu для отмены";
+                bot.edit_message_text(telegram_id, message_id, text)
+                    .await
+                    .expect("ERROR executing EditContact");
+            }
+            Ok(MenuCommand::TransactionDirectionTook) => {
+                user.selected_transaction_duration = Option::from(1);
+                db_util::set_selected_transaction_duration(&user, 1)
+                    .expect("ERROR executing TransactionDirectionTook");
+                set_user_status(&user, &InputtingStatus::TransactionAmount);
+                let text = "Пришли сумму или вернись в /menu для отмены";
+                bot.edit_message_text(telegram_id, message_id, text)
+                    .await
+                    .expect("ERROR executing EditContact");
             }
             Ok(MenuCommand::Debts) => {
-                bot.edit_message_text(telegram_id, message_id, get_debit())
+                let summary: Vec<(String, BigDecimal)> = get_debit(&user).expect("DB error");
+                let text = summary
+                    .iter()
+                    .map(|(name, amount)| format!("{}: {}", name, amount))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                bot.edit_message_text(telegram_id, message_id, text)
                     .await
                     .expect("ERROR executing getting debits");
             }
             Err(_) => {
-                bot.edit_message_text(
-                    telegram_id,
-                    message_id,
-                    format!("Необработанное нажатие: {data}"),
-                )
-                .await?;
+                if data.starts_with(CALLBACK_SELECT_USER_PLACEHOLDER) {
+                    handle_callback_for_selected_user(&data, &user, &bot, telegram_id, message_id)
+                        .await;
+                } else {
+                    let text = format!("Необработанное нажатие:\n\"{data}\"");
+                    bot.edit_message_text(telegram_id, message_id, text).await?;
+                }
             }
         }
     }
     Ok(())
+}
+
+async fn handle_callback_for_selected_user(
+    data: &String,
+    user: &User,
+    bot: &Bot,
+    telegram_id: UserId,
+    message_id: MessageId,
+) {
+    let contact_name = data.replace(CALLBACK_SELECT_USER_PLACEHOLDER, "");
+    let contact =
+        db_util::find_user_by_contact_name(user, &contact_name).expect("ERROR executing Username");
+    db_util::set_selected_contact(user, contact.id).expect("ERROR executing Username");
+    match user.status {
+        InputtingStatus::EditContactInternalName => {
+            let text = "Пришли новое имя или вернись в /menu для отмены";
+            bot.edit_message_text(telegram_id, message_id, text)
+                .await
+                .expect("ERROR executing EditContact");
+        }
+        InputtingStatus::SelectContactForTransaction => {
+            set_user_status(user, &InputtingStatus::SelectDirectionForTransaction);
+            let keyboard = InlineKeyboardMarkup::new(vec![
+                vec![
+                    InlineKeyboardButton::callback(
+                        "Взял в долг",
+                        MenuCommand::TransactionDirectionGave.to_string(),
+                    ),
+                    InlineKeyboardButton::callback(
+                        "Дал в долг",
+                        MenuCommand::TransactionDirectionTook.to_string(),
+                    ),
+                ],
+                vec![
+                    InlineKeyboardButton::callback(
+                        "История",
+                        MenuCommand::TransactionDirectionGave.to_string(),
+                    ),
+                    InlineKeyboardButton::callback(
+                        "Расчитались",
+                        MenuCommand::TransactionDirectionTook.to_string(),
+                    ),
+                ],
+            ]);
+            bot.edit_message_text(telegram_id, message_id, "Выбери:")
+                .await
+                .expect("ERROR executing SelectContactForTransaction");
+            bot.edit_message_reply_markup(telegram_id, message_id)
+                .reply_markup(keyboard)
+                .await
+                .expect("ERROR executing SelectContactForTransaction");
+        }
+        // InputtingStatus::SelectDirectionForTransaction => {
+        //     set_user_status(user, &InputtingStatus::TransactionAmount);
+        //     let text = "Пришли сумму или вернись в /menu для отмены";
+        //     bot.edit_message_text(telegram_id, message_id, text)
+        //         .await
+        //         .expect("ERROR executing EditContact");
+        // }
+        _ => {
+            let text = format!("Необработанное нажатие:\n\"{data}\"");
+            bot.edit_message_text(telegram_id, message_id, text)
+                .await
+                .expect("ERROR executing handle_callback_for_selected_user");
+        }
+    }
 }
 
 fn set_user_status(user: &User, new_status: &InputtingStatus) {
@@ -264,13 +378,96 @@ fn get_contacts_names(user: &User) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-fn get_debit() -> String {
-    // let mut s = String::new();
-    // for (tx, from_user, to_user) in db.get_debts().await? {
-    //     s.push_str(&format!(
-    //         "{} → {}: {} ₽\n",
-    //         from_user.name, to_user.name, tx.amount
-    //     ));
-    // }
-    "String::new()".to_string()
+fn get_debit(user: &User) -> Option<Vec<(String, BigDecimal)>> {
+    match db_util::get_debit(user) {
+        Ok(el) => Some(el),
+        Err(_) => None,
+    }
+}
+
+async fn send_menu(bot: &Bot, telegram_id: ChatId) {
+    let keyboard = InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("Долги", MenuCommand::SelectContact.to_string()),
+            InlineKeyboardButton::callback("Сводка", MenuCommand::Debts.to_string()),
+        ],
+        vec![
+            InlineKeyboardButton::callback(
+                "Добавить контакт",
+                MenuCommand::AddNewContact.to_string(),
+            ),
+            InlineKeyboardButton::callback(
+                "Редактировать контакт",
+                MenuCommand::EditContact.to_string(),
+            ),
+            InlineKeyboardButton::callback(
+                "Удалить контакт",
+                MenuCommand::DeleteContact.to_string(),
+            ),
+        ],
+    ]);
+    let user = db_util::get_user_by_telegram_id(telegram_id.0).unwrap();
+    set_user_status(&user, &InputtingStatus::None);
+    bot.send_message(telegram_id, "Выбери действие:")
+        .reply_markup(keyboard)
+        .await
+        .expect("ERROR creating menu");
+}
+
+async fn send_contacts(
+    bot: &Bot,
+    user: &User,
+    telegram_id: UserId,
+    message_id: MessageId,
+) -> Result<(), Error> {
+    let mut current_line: Vec<InlineKeyboardButton> = vec![];
+    let mut lines: Vec<Vec<InlineKeyboardButton>> = vec![];
+    let mut buttons_in_line: i8 = 0;
+    for contact_name in get_contacts_names(user) {
+        let callback_data = format!("{CALLBACK_SELECT_USER_PLACEHOLDER}{}", &contact_name);
+        current_line.push(InlineKeyboardButton::callback(&contact_name, callback_data));
+        buttons_in_line += 1;
+        if buttons_in_line >= 3 {
+            lines.push(current_line.clone());
+            current_line.clear();
+            buttons_in_line = 0;
+        }
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line.clone());
+    }
+    if !&lines.is_empty() {
+        bot.edit_message_text(telegram_id, message_id, "Выбери контакт:")
+            .await
+            .expect("ERROR executing send_contacts");
+        bot.edit_message_reply_markup(telegram_id, message_id)
+            .reply_markup(InlineKeyboardMarkup::new(lines))
+            .await
+            .expect("ERROR executing send_contacts");
+    }
+    Ok(())
+}
+
+async fn create_transaction(
+    from: &User,
+    to: &User,
+    msg_text: &str,
+    bot: &Bot,
+    telegram_id: ChatId,
+) -> Option<Transaction> {
+    match db_util::create_transaction(from, to, msg_text) {
+        Ok(transaction) => {
+            bot.send_message(telegram_id, "Готово")
+                .await
+                .expect("ERROR execute TransactionAmount");
+            send_menu(bot, telegram_id).await;
+            Some(transaction)
+        }
+        Err(_) => {
+            bot.send_message(telegram_id, "Ошибка парсинга суммы")
+                .await
+                .expect("ERROR execute TransactionAmount");
+            None
+        }
+    }
 }

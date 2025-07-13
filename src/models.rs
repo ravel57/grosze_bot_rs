@@ -14,6 +14,7 @@ pub struct User {
     pub telegram_username: String,
     pub status: InputtingStatus,
     pub selected_contact_id: Option<i32>,
+    pub selected_transaction_duration: Option<i32>, // 0 - дал, 1 - взял; TODO заменить на enum
 }
 
 #[derive(Debug, Insertable)]
