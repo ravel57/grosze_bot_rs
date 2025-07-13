@@ -68,7 +68,7 @@ async fn handle_message(bot: Bot, msg: Message) -> HandlerResult {
                     bot.send_message(telegram_id, "Пришли как ты хочешь подписать этот контакт")
                         .await
                         .expect_err("ERROR executing NewContactTelegramUsername");
-                    set_user_status(&user, &InputtingStatus::TransactionAmount)
+                    set_user_status(&user, &InputtingStatus::NewContactInternalName)
                 }
                 Err(_) => {
                     bot.send_message(telegram_id, "Пользователь не найден")
