@@ -1,0 +1,16 @@
+[package]
+name = "grosze_bot_rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+diesel = { version = "2.2", features = ["postgres", "numeric"] }
+diesel_migrations = "2.2"
+bigdecimal = { version = "0.4.8", features = ["serde"] }
+teloxide = { version = "0.17.0", features = ["macros"] }
+log = "0.4"
+pretty_env_logger = "0.5"
+tokio = { version =  "1.8", features = ["rt-multi-thread", "macros"] }
+
+[package.metadata.diesel]
+migration-directory = "migrations"
