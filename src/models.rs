@@ -13,6 +13,7 @@ pub struct User {
     pub telegram_id: i64,
     pub telegram_username: String,
     pub status: InputtingStatus,
+    pub selected_contact_id: Option<i32>,
 }
 
 #[derive(Debug, Insertable)]

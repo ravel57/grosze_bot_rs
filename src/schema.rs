@@ -16,6 +16,7 @@ table! {
         telegram_id -> BigInt,
         telegram_username -> Text,
         status -> crate::schema::sql_types::Inputting_status,
+        selected_contact_id -> Nullable<Integer>,
     }
 }
 

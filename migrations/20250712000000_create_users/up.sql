@@ -2,8 +2,9 @@ CREATE TYPE inputting_status AS ENUM ('none', 'new_contact_telegram_username', '
 
 CREATE TABLE IF NOT EXISTS users_t
 (
-    id                SERIAL PRIMARY KEY,
-    telegram_id       BIGINT           NOT NULL UNIQUE,
-    telegram_username TEXT             NOT NULL,
-    status            inputting_status NOT NULL DEFAULT 'none'
+    id                  SERIAL PRIMARY KEY,
+    telegram_id         BIGINT           NOT NULL UNIQUE,
+    telegram_username   TEXT             NOT NULL,
+    status              inputting_status NOT NULL DEFAULT 'none',
+    selected_contact_id INTEGER          NULL
 );

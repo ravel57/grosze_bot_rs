@@ -1,6 +1,7 @@
 use crate::db_util;
 use crate::inputting_status::InputtingStatus;
 use crate::models::User;
+use crate::schema::contacts::dsl::contacts;
 use crate::HandlerResult;
 use diesel::prelude::*;
 use diesel::result::Error;
@@ -14,7 +15,7 @@ use teloxide::types::InlineKeyboardButton;
 use teloxide::types::InlineKeyboardMarkup;
 use teloxide::utils::command::BotCommands;
 use teloxide::utils::command::ParseError;
-use teloxide::{errors, Bot};
+use teloxide::Bot;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
@@ -56,26 +57,38 @@ pub fn message_handler_schema() -> Handler<'static, HandlerResult, DpHandlerDesc
 async fn handle_message(bot: Bot, msg: Message) -> HandlerResult {
     let telegram_id = msg.chat.id;
     let user = db_util::get_user_by_telegram_id(telegram_id.0).unwrap();
+    let msg_text = msg.text().expect("ERROR getting message text").to_string();
     match user.status {
         InputtingStatus::None => { /*TODO*/ }
         InputtingStatus::NewContactTelegramUsername => {
-            let result = add_new_contact(
-                &user,
-                &msg.text().expect("ERROR getting message text").to_string(),
-            );
+            let username = msg_text.replace("@", "");
+            let result = add_new_contact(&user, &username);
             match result {
-                Ok(_) => {
+                Ok(contact) => {
                     bot.send_message(telegram_id, "Пришли как ты хочешь подписать этот контакт")
                         .await
-                        .expect_err("ERROR executing NewContactTelegramUsername");
+                        .expect("ERROR executing NewContactTelegramUsername");
+                    println!("{:?}\n{:?}", user, contact);
+                    db_util::set_selected_contact(&user, contact.id)
+                        .expect("ERROR executing NewContactTelegramUsername");
                     set_user_status(&user, &InputtingStatus::NewContactInternalName)
                 }
                 Err(_) => {
-                    bot.send_message(telegram_id, "Пользователь не найден")
-                        .await
-                        .expect_err("ERROR executing NewContactTelegramUsername");
+                    bot.send_message(telegram_id, "Пользователь не найден\nСкорее всего он не зарегестирован в боте или ошибка в имени\nПришли еще раз или перейди в /menu")
+						.await
+						.expect("ERROR executing NewContactTelegramUsername");
                 }
             }
+        }
+        InputtingStatus::NewContactInternalName => {
+            let contact = db_util::get_selected_contact(&user).unwrap();
+            let result = edit_contact(&user, &contact, &msg_text);
+            match result {
+                Ok(_) => bot.send_message(telegram_id, "Готово".to_string()),
+                Err(_) => bot.send_message(telegram_id, "Ошибка".to_string()),
+            }
+            .await
+            .expect("ERROR executing NewContactInternalName");
         }
         InputtingStatus::TransactionAmount => { /*TODO*/ }
     }
@@ -134,7 +147,7 @@ async fn handle_command(bot: Bot, msg: Message) -> HandlerResult {
             }
             Ok(Command::Contacts) => {
                 let user = db_util::get_user_by_telegram_id(telegram_id.0).unwrap();
-                let contacts_str = get_contact_names(&user).join("\n");
+                let contacts_str = get_contacts_names(&user).join("\n");
                 bot.send_message(telegram_id, format!("Твои контакты:\n{contacts_str}"))
                     .await
                     .expect("ERROR executing getting contacts");
@@ -165,7 +178,7 @@ async fn handle_callback(bot: Bot, callback: CallbackQuery) -> HandlerResult {
                 let mut current_line: Vec<InlineKeyboardButton> = vec![];
                 let mut lines: Vec<Vec<InlineKeyboardButton>> = vec![];
                 let mut buttons_in_line: i8 = 0;
-                for contact_name in get_contact_names(&user) {
+                for contact_name in get_contacts_names(&user) {
                     current_line.push(InlineKeyboardButton::callback(
                         &contact_name,
                         format!("selected_contact_{}", &contact_name),
@@ -180,7 +193,7 @@ async fn handle_callback(bot: Bot, callback: CallbackQuery) -> HandlerResult {
                 if !current_line.is_empty() {
                     lines.push(current_line.clone());
                 }
-                if !lines.is_empty() {
+                if !&lines.is_empty() {
                     bot.edit_message_text(telegram_id, message_id, "Выбери контакт:")
                         .await
                         .expect("ERROR executing SelectContact callback");
@@ -214,15 +227,42 @@ async fn handle_callback(bot: Bot, callback: CallbackQuery) -> HandlerResult {
     Ok(())
 }
 
-fn add_new_contact(user: &User, new_contact_name: &String) -> Result<(), diesel::result::Error> {
+fn set_user_status(user: &User, new_status: &InputtingStatus) {
+    db_util::set_user_status(user, new_status).expect("ERROR setting user status");
+}
+
+fn add_new_contact(user: &User, new_contact_name: &String) -> Result<User, Error> {
     match db_util::get_user_by_username(new_contact_name) {
         Ok(contact) => {
             db_util::find_or_create_contact(user, &contact);
+            set_user_status(user, &InputtingStatus::NewContactInternalName);
+            Ok(contact)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn edit_contact(user: &User, contact: &User, contact_new_name: &String) -> Result<(), Error> {
+    match db_util::edit_contact(user, contact, contact_new_name) {
+        Ok(_) => {
             set_user_status(user, &InputtingStatus::None);
             Ok(())
         }
         Err(e) => Err(e),
     }
+}
+
+fn get_contacts_names(user: &User) -> Vec<String> {
+    db_util::find_all_contacts_for_user(user)
+        .iter()
+        .map(|contact| {
+            contact.name.clone().unwrap_or_else(|| {
+                db_util::find_or_create_user(contact.id as i64, &String::new())
+                    .telegram_username
+                    .clone()
+            })
+        })
+        .collect::<Vec<_>>()
 }
 
 fn get_debit() -> String {
@@ -234,21 +274,4 @@ fn get_debit() -> String {
     //     ));
     // }
     "String::new()".to_string()
-}
-
-fn set_user_status(user: &User, new_status: &InputtingStatus) {
-    db_util::set_user_status(user, new_status).expect("ERROR setting user status");
-}
-
-fn get_contact_names(user: &User) -> Vec<String> {
-    db_util::find_all_contacts_for_user(user)
-        .iter()
-        .map(|contact| {
-            contact.name.clone().unwrap_or_else(|| {
-                db_util::find_or_create_user(contact.id as i64, &String::new())
-                    .telegram_username
-                    .clone()
-            })
-        })
-        .collect::<Vec<_>>()
 }

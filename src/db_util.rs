@@ -17,8 +17,8 @@ use diesel::result::QueryResult;
 use diesel::upsert::excluded;
 use diesel::PgConnection;
 use diesel::RunQueryDsl;
-use std::str::FromStr;
 use log::error;
+use std::str::FromStr;
 
 /// blablabla
 pub fn get_user_by_telegram_id(tg_id_val: i64) -> QueryResult<User> {
@@ -111,4 +111,37 @@ pub fn set_user_status(user: &User, new_status: &InputtingStatus) -> QueryResult
     diesel::update(users_dsl::users_t.filter(users_dsl::id.eq(user.id)))
         .set(users_dsl::status.eq(new_status))
         .get_result(&mut conn)
+}
+
+pub fn edit_contact(
+    user: &User,
+    contact: &User,
+    contact_new_name: &String,
+) -> QueryResult<Contact> {
+    let mut conn = establish_connection();
+    diesel::update(
+        contacts_dsl::contacts
+            .filter(contacts_dsl::user_id.eq(user.id))
+            .filter(contacts_dsl::contact_id.eq(contact.id)),
+    )
+    .set(contacts_dsl::name.eq(contact_new_name))
+    .get_result(&mut conn)
+}
+
+pub fn set_selected_contact(user: &User, contact_id: i32) -> QueryResult<User> {
+    let mut conn = establish_connection();
+    diesel::update(users_dsl::users_t.filter(users_dsl::id.eq(user.id)))
+        .set(users_dsl::selected_contact_id.eq(contact_id))
+        .get_result(&mut conn)
+}
+
+pub fn get_selected_contact(user: &User) -> QueryResult<User> {
+    let mut conn = establish_connection();
+    if let Some(contact_id) = user.selected_contact_id {
+        users_dsl::users_t
+            .filter(users_dsl::id.eq(contact_id))
+            .first(&mut conn)
+    } else {
+        Err(diesel::result::Error::NotFound)
+    }
 }

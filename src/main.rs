@@ -21,7 +21,8 @@ async fn main() -> HandlerResult {
     pretty_env_logger::init();
 
     let mut conn = establish_connection();
-    conn.run_pending_migrations(MIGRATIONS).expect("Error applying migrations");
+    conn.run_pending_migrations(MIGRATIONS)
+        .expect("Error applying migrations");
 
     let bot = Bot::from_env();
     Dispatcher::builder(bot, telegram_util::message_handler_schema())
