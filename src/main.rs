@@ -1,66 +1,41 @@
-use diesel::pg::PgConnection;
-use diesel::prelude::*;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use diesel::{Connection, PgConnection};
+use diesel_migrations::EmbeddedMigrations;
+use diesel_migrations::{embed_migrations, MigrationHarness};
 use std::env;
-use std::str::FromStr;
-use teloxide::macros::BotCommands;
-use teloxide::prelude::{Message, Requester, ResponseResult};
-use teloxide::repls::CommandReplExt;
+use teloxide::dispatching::Dispatcher;
 use teloxide::Bot;
 
-mod db_commands;
+mod db_util;
+mod inputting_status;
 mod models;
 mod schema;
+mod telegram_util;
 
 /// Встраиваем все миграции из каталога `migrations/`
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
+type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
 #[tokio::main]
-async fn main() {
-    // let conn = establish_connection();
+async fn main() -> HandlerResult {
     pretty_env_logger::init();
+
+    let mut conn = establish_connection();
+    conn.run_pending_migrations(MIGRATIONS).expect("Error applying migrations");
+
     let bot = Bot::from_env();
-    Command::repl(bot, answer).await;
+    Dispatcher::builder(bot, telegram_util::message_handler_schema())
+        .enable_ctrlc_handler()
+        .build()
+        .dispatch()
+        .await;
+    Ok(())
 }
 
-fn establish_connection() -> PgConnection {
+pub fn establish_connection() -> PgConnection {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let mut conn = PgConnection::establish(&database_url).expect("Error connecting to database");
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run migrations");
     conn
-}
-
-/// These commands are supported:
-#[derive(BotCommands, Clone)]
-#[command(rename_rule = "lowercase")]
-enum Command {
-    #[command()]
-    Debts,
-    #[command()]
-    Contacts,
-}
-
-async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
-    let conn = establish_connection();
-    match cmd {
-        Command::Debts => {
-            // let mut s = String::new();
-            // for (tx, from_user, to_user) in db.get_debts().await? {
-            //     s.push_str(&format!(
-            //         "{} → {}: {} ₽\n",
-            //         from_user.name, to_user.name, tx.amount
-            //     ));
-            // }
-            bot.send_message(msg.chat.id, "s").await?;
-        }
-        Command::Contacts => {
-            db_commands::find_or_create_contact()
-            bot.send_message(msg.chat.id, "Твои контакты:".to_string())
-                .await?;
-        }
-    };
-    Ok(())
 }
 
 /*

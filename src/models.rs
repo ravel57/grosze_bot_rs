@@ -1,7 +1,10 @@
-use super::schema::{users_t, contacts, transactions};
-use diesel::prelude::*;
+use super::schema::contacts;
+use super::schema::transactions;
+use super::schema::users_t;
+use crate::inputting_status::InputtingStatus;
 use bigdecimal::BigDecimal;
-use diesel::{Queryable, Identifiable};
+use diesel::prelude::*;
+use diesel::{Identifiable, Queryable};
 
 #[derive(Debug, Queryable, Selectable, Identifiable)]
 #[diesel(table_name = users_t)]
@@ -9,6 +12,7 @@ pub struct User {
     pub id: i32,
     pub telegram_id: i64,
     pub telegram_username: String,
+    pub status: InputtingStatus,
 }
 
 #[derive(Debug, Insertable)]
@@ -25,7 +29,7 @@ pub struct Contact {
     pub id: i32,
     pub user_id: i32,
     pub contact_id: i32,
-    pub name: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Insertable)]
@@ -33,7 +37,6 @@ pub struct Contact {
 pub struct NewContact {
     pub user_id: i32,
     pub contact_id: i32,
-    pub name: String,
 }
 
 #[derive(Debug, Queryable, Selectable, Identifiable, Associations)]
