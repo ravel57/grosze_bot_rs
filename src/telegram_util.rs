@@ -19,12 +19,14 @@ use teloxide::utils::command::BotCommands;
 use teloxide::utils::command::ParseError;
 use teloxide::Bot;
 
-const CALLBACK_SELECT_USER_PLACEHOLDER: &'static str = "selected_contact_";
+const CALLBACK_SELECT_USER_PREFIX: &'static str = "selected_contact_";
 
 /*
   TODO
+    Комментарии к долгу
     Подтверждения
     Расчитались
+    Кнопка НАЗАД В МЕНЮ
 */
 
 #[derive(BotCommands, Clone)]
@@ -264,7 +266,7 @@ async fn handle_callback(bot: Bot, callback: CallbackQuery) -> HandlerResult {
             Ok(MenuCommand::TransactionSettledAccounts) => { /*TODO*/ }
             Ok(MenuCommand::TransactionHistory) => { /*TODO*/ }
             Err(_) => {
-                if data.starts_with(CALLBACK_SELECT_USER_PLACEHOLDER) {
+                if data.starts_with(CALLBACK_SELECT_USER_PREFIX) {
                     handle_callback_for_selected_user(&data, &user, &bot, telegram_id, message_id)
                         .await;
                 } else {
@@ -284,7 +286,7 @@ async fn handle_callback_for_selected_user(
     telegram_id: UserId,
     message_id: MessageId,
 ) {
-    let contact_name = data.replace(CALLBACK_SELECT_USER_PLACEHOLDER, "");
+    let contact_name = data.replace(CALLBACK_SELECT_USER_PREFIX, "");
     let contact =
         db_util::find_user_by_contact_name(user, &contact_name).expect("ERROR executing Username");
     db_util::set_selected_contact(user, contact.id).expect("ERROR executing Username");
@@ -426,7 +428,7 @@ async fn send_contacts(
     let mut lines: Vec<Vec<InlineKeyboardButton>> = vec![];
     let mut buttons_in_line: i8 = 0;
     for contact_name in get_contacts_names(user) {
-        let callback_data = format!("{CALLBACK_SELECT_USER_PLACEHOLDER}{}", &contact_name);
+        let callback_data = format!("{CALLBACK_SELECT_USER_PREFIX}{}", &contact_name);
         current_line.push(InlineKeyboardButton::callback(&contact_name, callback_data));
         buttons_in_line += 1;
         if buttons_in_line >= 3 {
